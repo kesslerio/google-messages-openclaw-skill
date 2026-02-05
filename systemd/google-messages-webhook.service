@@ -1,0 +1,26 @@
+[Unit]
+Description=Google Messages SMS Webhook Server
+Documentation=https://github.com/openclaw/google-messages-skill
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.openclaw/skills/google-messages
+ExecStart=/usr/bin/node %h/.openclaw/skills/google-messages/sms-webhook-server.js
+Restart=on-failure
+RestartSec=10
+
+# Environment - uncomment and configure
+#Environment=SMS_NOTIFICATION_TARGET=telegram:YOUR_CHAT_ID
+#Environment=SMS_NOTIFICATION_CHANNEL=telegram
+#Environment=SMS_WEBHOOK_PORT=19888
+
+# Or use an environment file
+#EnvironmentFile=%h/.config/google-messages/env
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
