@@ -1,6 +1,6 @@
 [Unit]
 Description=Google Messages SMS Webhook Server
-Documentation=https://github.com/openclaw/google-messages-skill
+Documentation=https://github.com/kesslerio/google-messages-openclaw-skill
 After=network.target
 
 [Service]
