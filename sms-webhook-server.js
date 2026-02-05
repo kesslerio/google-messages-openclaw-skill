@@ -81,13 +81,23 @@ function forwardToOpenClaw(data) {
     return;
   }
   
-  const msg = `📱 SMS from ${data.contact || 'Unknown'}: ${data.preview || data.message || '(no content)'}`;
+  // Sanitize user input to prevent command injection
+  const contact = String(data.contact || 'Unknown').replace(/[^a-zA-Z0-9\s\-_@.()]/g, '').substring(0, 50);
+  const preview = String(data.preview || data.message || '(no content)').replace(/[^a-zA-Z0-9\s\-_@.(),!?]/g, '').substring(0, 100);
+  const msg = `📱 SMS from ${contact}: ${preview}`;
   
   try {
     // Use full path to openclaw CLI (not in PATH for systemd service)
     const openclawPath = process.env.OPENCLAW_PATH || '/home/art/.local/bin/openclaw';
-    const cmd = `${openclawPath} message send -t "${NOTIFICATION_TARGET}" --channel ${NOTIFICATION_CHANNEL} -m "${msg.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`;
-    execSync(cmd, { timeout: 15000, stdio: 'pipe' });
+    
+    // Use execFile with args array instead of execSync with string to prevent injection
+    const { execFileSync } = require('child_process');
+    execFileSync(openclawPath, [
+      'message', 'send',
+      '-t', NOTIFICATION_TARGET,
+      '--channel', NOTIFICATION_CHANNEL,
+      '-m', msg
+    ], { timeout: 15000, stdio: 'pipe' });
     console.log('✅ Forwarded to', NOTIFICATION_CHANNEL);
   } catch (e) {
     console.error('❌ Failed to forward:', e.message);
@@ -109,10 +119,33 @@ const server = http.createServer((req, res) => {
   
   if (req.method === 'POST' && req.url === '/sms-inbound') {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    req.on('data', chunk => {
+      // Limit body size to prevent memory exhaustion
+      if (body.length + chunk.length > 100000) {
+        console.error('❌ Request body too large');
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Request body too large' }));
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', () => {
       try {
+        if (!body) {
+          console.error('❌ Empty request body');
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Empty request body' }));
+          return;
+        }
+        
         const data = JSON.parse(body);
+        
+        // Validate required fields
+        if (!data || typeof data !== 'object') {
+          throw new Error('Invalid data structure');
+        }
+        
         console.log('\n📱 New SMS:', JSON.stringify(data, null, 2));
         
         // Rate limit and dedup check
@@ -130,10 +163,15 @@ const server = http.createServer((req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (e) {
-        console.error('Parse error:', e);
+        console.error('❌ Parse error:', e.message);
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        res.end(JSON.stringify({ error: 'Invalid JSON or malformed request' }));
       }
+    });
+    req.on('error', (e) => {
+      console.error('❌ Request error:', e.message);
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Request error' }));
     });
   } else if (req.method === 'GET' && req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });

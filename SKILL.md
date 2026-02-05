@@ -102,15 +102,22 @@ node sms-webhook-server.js
 
 #### 3. Inject the observer into the browser
 
-After the Google Messages page is loaded:
-```
-browser action=act profile=openclaw request={"kind": "evaluate", "fn": "<contents of sms-observer.js>"}
+After the Google Messages page is loaded, inject the observer script using the browser evaluate action:
+
+```javascript
+// First, read the observer script and prepare it
+const fs = require('fs');
+const observerScript = fs.readFileSync('./sms-observer.js', 'utf8');
+const config = { webhookUrl: 'http://127.0.0.1:19888/sms-inbound', debug: true };
+const fullScript = `const __SMS_OBSERVER_CONFIG__ = ${JSON.stringify(config)}; ${observerScript}`;
 ```
 
-Or use the helper script:
-```bash
-./scripts/inject-observer.sh
+Then use the browser tool to evaluate:
 ```
+browser action=act profile=openclaw request={"kind": "evaluate", "fn": "<fullScript contents>"}
+```
+
+**Verify injection:** Open browser console and check `window._smsObserver` — it should be defined.
 
 ### Systemd Service (Persistent)
 
