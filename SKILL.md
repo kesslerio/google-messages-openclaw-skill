@@ -75,59 +75,42 @@ browser action=act profile=openclaw request={"kind": "click", "ref": "<send_butt
 
 ---
 
-## Receiving Messages (Real-time Notifications)
+## Receiving Messages (Polling Mode)
 
-This skill includes a real-time notification system using a MutationObserver and webhook.
+This skill uses a polling-based approach for incoming message detection.
 
-### Components
+### Why Polling?
 
-1. **sms-webhook-server.js** - HTTP server that receives notifications and forwards to your preferred channel
-2. **sms-observer.js** - Browser script that watches for new messages
+Sandboxed browser environments cannot make HTTP requests to localhost due to Chrome's Private Network Access restrictions. The polling approach works around this by having the agent pull messages rather than the browser push them.
 
 ### Setup
 
-#### 1. Configure the webhook server
+1. **Inject the observer** into the browser after loading Google Messages:
 
-Edit `sms-webhook-server.js` and set your notification target:
 ```javascript
-const NOTIFICATION_TARGET = 'telegram:YOUR_CHAT_ID'; // or other OpenClaw channel
-const NOTIFICATION_CHANNEL = 'telegram'; // telegram, whatsapp, signal, etc.
+// Inject sms-observer.js contents
+eval(smsObserverScript);
 ```
 
-#### 2. Start the webhook server
-```bash
-node sms-webhook-server.js
-# Or install as systemd service (see below)
+2. **Poll for new messages** periodically:
+
+```javascript
+// Check for pending notifications
+const pending = window._smsObserver.getPending();
+if (pending.length > 0) {
+  // Forward to your preferred channel
+}
 ```
 
-#### 3. Inject the observer into the browser
+### Observer API
 
-After the Google Messages page is loaded:
-```
-browser action=act profile=openclaw request={"kind": "evaluate", "fn": "<contents of sms-observer.js>"}
-```
-
-Or use the helper script:
-```bash
-./scripts/inject-observer.sh
-```
-
-### Systemd Service (Persistent)
-
-Install as a systemd user service:
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp systemd/google-messages-webhook.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now google-messages-webhook
-```
-
-Check status:
-```bash
-systemctl --user status google-messages-webhook
-journalctl --user -u google-messages-webhook -f
-```
+| Method | Description |
+|--------|-------------|
+| `getPending()` | Get and clear pending notifications |
+| `hasPending()` | Check if there are pending notifications |
+| `peekPending()` | Get pending without clearing |
+| `check()` | Force check for new messages |
+| `getConversations()` | Get current conversation list |
 
 ---
 
@@ -199,7 +182,7 @@ Google Messages uses Angular/Material components. These selectors may change wit
 | Send button disabled | Message input empty or phone disconnected |
 | "Phone not connected" | Phone needs internet, same Google account |
 | Observer not detecting | Check browser console for errors |
-| Webhook not receiving | Verify server is running on port 19888 |
+| Missed messages | Observer state resets on page reload, re-inject needed |
 
 ---
 
@@ -209,7 +192,7 @@ Google Messages uses Angular/Material components. These selectors may change wit
 2. **Same Google account** - Phone and web must use same account
 3. **Session expires** - May need re-pairing after ~14 days of inactivity
 4. **Browser tab required** - Must stay open for notifications
-5. **Re-inject on reload** - Observer script lost if page refreshes
+5. **Polling delay** - Messages detected on next poll, not instant
 
 ---
 
@@ -219,10 +202,9 @@ Google Messages uses Angular/Material components. These selectors may change wit
 - Don't share browser profile with session
 - Consider dedicated browser profile for this skill
 - QR pairing links to your phone - treat as sensitive
-- Webhook server listens only on localhost by default
 
 ---
 
 ## License
 
-MIT
+Apache-2.0
