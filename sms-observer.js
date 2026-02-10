@@ -24,7 +24,47 @@
   let lastSeenMessages = new Map(); // contact -> { preview, time }
   let initialized = false;
   let observerAttached = false;
-  
+
+  // --- SMS Security Filter ---
+  // Hardcoded patterns (browser context can't read config files).
+  // Keep in sync with security/sensitive-sms-patterns.txt
+  const SENSITIVE_PATTERNS = [
+    /\b\d{6}\b.*(?:code|verify|confirm|otp|pin)/i,
+    /(?:code|verify|confirm|otp|pin).*\b\d{6}\b/i,
+    /^\s*\d{4,8}\s*$/,
+    /(?:verification|security|auth|login|sign.?in)\s*code/i,
+    /one.time.*(code|password|passcode|pin)/i,
+    /your.*\bcode\b\s*(?:is|for|:)/i,
+    /(?:2fa|two.factor|mfa|multi.factor)/i,
+    /(?:reset|change|recover|forgot).*password/i,
+    /password.*(reset|change|recover|expir)/i,
+    /verify your/i,
+    /confirm your.*(phone|number|identity|account|email)/i,
+    /verification\s*(code|link|required)/i,
+    /(?:new|unusual|suspicious|unrecognized).*(sign.?in|login|device|activity)/i,
+    /security alert/i,
+    /was this you/i
+  ];
+
+  function isShortCode(name) {
+    if (!name) return false;
+    const cleaned = String(name).trim().replace(/^\+/, '');
+    return /^\d{4,6}$/.test(cleaned);
+  }
+
+  function isSensitiveMessage(text, contact) {
+    if (!text && !contact) return false;
+    // Short code sender
+    if (isShortCode(contact)) return true;
+    // Content patterns
+    if (text) {
+      for (const pat of SENSITIVE_PATTERNS) {
+        if (pat.test(text)) return true;
+      }
+    }
+    return false;
+  }
+
   function log(...args) {
     if (DEBUG || args[0]?.startsWith?.('New message')) {
       console.log('[SMS Observer]', ...args);
@@ -97,13 +137,20 @@
         }
       }
       
+      const contactName = nameEl?.innerText?.trim() || 'Unknown';
+      const rawPreview = preview.trim().substring(0, 150);
+
+      // Exclude sensitive messages entirely — contact names and timestamps
+      // of filtered senders (e.g. "Google" at login time) can leak info
+      if (isSensitiveMessage(rawPreview, contactName)) return;
+
       convos.push({
         index: i,
-        contact: nameEl?.innerText?.trim() || 'Unknown',
-        preview: preview.trim().substring(0, 150),
+        contact: contactName,
+        preview: rawPreview,
         time: timeEl?.innerText?.trim() || '',
-        hasUnread: !!unreadEl || 
-                   item.classList.contains('unread') || 
+        hasUnread: !!unreadEl ||
+                   item.classList.contains('unread') ||
                    item.querySelector('.unread') !== null
       });
     });
@@ -138,8 +185,8 @@
       
       if (isNewMessage && isIncoming) {
         logAlways('New message detected:', c.contact, '-', c.preview.substring(0, 50));
-        
-        // POST to webhook
+
+        // POST to webhook (sensitive messages already excluded by getConversations)
         fetch(WEBHOOK_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
