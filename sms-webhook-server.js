@@ -22,6 +22,9 @@ const PORT = process.env.SMS_WEBHOOK_PORT || 19888;
 const NOTIFICATION_TARGET = process.env.SMS_NOTIFICATION_TARGET || ''; // e.g., 'telegram:123456789'
 const NOTIFICATION_CHANNEL = process.env.SMS_NOTIFICATION_CHANNEL || 'telegram';
 
+// SMS security filter (backstop — if observer reloads without filter, server still blocks)
+const { isSensitiveMessage } = require('./sms-filter');
+
 // Rate limiting to prevent spam
 const rateLimitMap = new Map();
 const RATE_LIMIT_MS = 5000; // Minimum ms between notifications for same contact
@@ -148,6 +151,16 @@ const server = http.createServer((req, res) => {
         
         console.log('\n📱 New SMS:', JSON.stringify(data, null, 2));
         
+        // Security filter backstop — if observer is reloaded without filter, server still blocks
+        const msgText = data.preview || data.message || '';
+        const msgContact = data.contact || '';
+        if (isSensitiveMessage(msgText, msgContact)) {
+          console.log(`🔒 Sensitive message filtered (not forwarding): ${msgContact.substring(0, 30)}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, skipped: true, reason: 'sensitive' }));
+          return;
+        }
+
         // Rate limit and dedup check
         const check = shouldNotify(data);
         if (!check.notify) {
@@ -156,7 +169,7 @@ const server = http.createServer((req, res) => {
           res.end(JSON.stringify({ ok: true, skipped: true, reason: check.reason }));
           return;
         }
-        
+
         // Forward to OpenClaw
         forwardToOpenClaw(data);
         

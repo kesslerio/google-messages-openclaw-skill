@@ -6,8 +6,23 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_FILE="$SCRIPT_DIR/.last_messages.json"
-NOTIFICATION_TARGET="${SMS_NOTIFICATION_TARGET:-telegram:8352721935}"
+NOTIFICATION_TARGET="${SMS_NOTIFICATION_TARGET:-}"
 NOTIFICATION_CHANNEL="${SMS_NOTIFICATION_CHANNEL:-telegram}"
+
+if [[ -z "$NOTIFICATION_TARGET" ]]; then
+  echo "SMS_NOTIFICATION_TARGET not set, skipping" >&2
+  exit 0
+fi
+
+# Source SMS security filter
+SMS_FILTER_LIB="${HOME}/.local/lib/sms-security-filter.sh"
+if [[ -f "$SMS_FILTER_LIB" ]]; then
+  # shellcheck source=/dev/null
+  source "$SMS_FILTER_LIB"
+  _SMS_FILTER_LOADED=1
+else
+  _SMS_FILTER_LOADED=0
+fi
 
 # Get current conversations via browser
 get_conversations() {
@@ -50,6 +65,11 @@ if [ -f "$STATE_FILE" ]; then
     
     # Check if this message was in last state
     if ! echo "$LAST" | grep -qF "$preview"; then
+      # Skip sensitive messages (2FA, OTP, password resets)
+      if [[ "$_SMS_FILTER_LOADED" -eq 1 ]] && sms_is_sensitive "$contact" "$preview" "$contact"; then
+        echo "Filtered sensitive: $contact"
+        continue
+      fi
       echo "New message from $contact: $preview"
       openclaw message send -t "$NOTIFICATION_TARGET" --channel "$NOTIFICATION_CHANNEL" -m "📱 SMS from $contact: $preview" 2>/dev/null || true
     fi

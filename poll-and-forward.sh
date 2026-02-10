@@ -4,9 +4,24 @@
 
 set -e
 
-NOTIFICATION_TARGET="${SMS_NOTIFICATION_TARGET:-telegram:8352721935}"
+NOTIFICATION_TARGET="${SMS_NOTIFICATION_TARGET:-}"
 NOTIFICATION_CHANNEL="${SMS_NOTIFICATION_CHANNEL:-telegram}"
 STATE_FILE="${SMS_STATE_FILE:-/tmp/sms-observer-state.json}"
+
+if [[ -z "$NOTIFICATION_TARGET" ]]; then
+  echo "SMS_NOTIFICATION_TARGET not set, skipping" >&2
+  exit 0
+fi
+
+# Source SMS security filter
+SMS_FILTER_LIB="${HOME}/.local/lib/sms-security-filter.sh"
+if [[ -f "$SMS_FILTER_LIB" ]]; then
+  # shellcheck source=/dev/null
+  source "$SMS_FILTER_LIB"
+  _SMS_FILTER_LOADED=1
+else
+  _SMS_FILTER_LOADED=0
+fi
 
 # Get pending messages from browser via CDP
 get_pending() {
@@ -56,6 +71,11 @@ echo "$pending" | jq -c '.[]' | while read -r msg; do
   preview=$(echo "$msg" | jq -r '.preview')
   
   if [ -n "$contact" ] && [ "$contact" != "null" ]; then
+    # Skip sensitive messages (2FA, OTP, password resets)
+    if [[ "$_SMS_FILTER_LOADED" -eq 1 ]] && sms_is_sensitive "$contact" "$preview" "$contact"; then
+      echo "Filtered sensitive: $contact"
+      continue
+    fi
     forward_message "$contact" "$preview"
   fi
 done
