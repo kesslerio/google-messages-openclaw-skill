@@ -15,6 +15,14 @@
  */
 
 (function(config) {
+  // Tear down previous instance to prevent duplicate observers on re-injection
+  if (window._smsObserver) {
+    if (window._smsObserverCleanup) {
+      window._smsObserverCleanup();
+    }
+    console.log('[SMS Observer] Previous instance cleaned up, reinitializing...');
+  }
+  
   // Configuration
   const WEBHOOK_URL = config?.webhookUrl || 'http://127.0.0.1:19888/sms-inbound';
   const CHECK_INTERVAL = config?.checkInterval || 2000; // ms between polls
@@ -22,6 +30,8 @@
   
   // State
   let lastSeenMessages = new Map(); // contact -> { preview, time }
+  let pendingQueue = []; // queue of new incoming messages for polling consumers
+  const MAX_PENDING = 50;
   let initialized = false;
   let observerAttached = false;
   
@@ -139,6 +149,19 @@
       if (isNewMessage && isIncoming) {
         logAlways('New message detected:', c.contact, '-', c.preview.substring(0, 50));
         
+        // Add to pending queue for polling consumers
+        const entry = {
+          contact: c.contact,
+          preview: c.preview,
+          time: c.time,
+          timestamp: Date.now(),
+          hasUnread: c.hasUnread
+        };
+        pendingQueue.push(entry);
+        if (pendingQueue.length > MAX_PENDING) {
+          pendingQueue.shift(); // drop oldest
+        }
+        
         // POST to webhook
         fetch(WEBHOOK_URL, {
           method: 'POST',
@@ -207,7 +230,16 @@
     checkForNewMessages();
     
     // Backup polling (in case mutations are missed)
-    setInterval(checkForNewMessages, CHECK_INTERVAL);
+    const pollInterval = setInterval(checkForNewMessages, CHECK_INTERVAL);
+    
+    // Register cleanup function for safe re-injection
+    window._smsObserverCleanup = () => {
+      observer.disconnect();
+      clearInterval(pollInterval);
+      clearTimeout(window._smsObserverTimeout);
+      observerAttached = false;
+      logAlways('Observer disconnected and intervals cleared');
+    };
   }
   
   // Start
@@ -224,14 +256,26 @@
   window._smsObserver = {
     check: checkForNewMessages,
     getConversations,
+    // Return pending queue and clear it (consume semantics)
     getPending: () => {
-      return getConversations().filter(c => c.hasUnread);
+      const items = pendingQueue.slice();
+      pendingQueue.length = 0;
+      return items;
+    },
+    // Check if there are pending messages without consuming
+    hasPending: () => {
+      return pendingQueue.length > 0;
+    },
+    // Peek at pending messages without clearing the queue
+    peekPending: () => {
+      return pendingQueue.slice();
     },
     lastSeen: lastSeenMessages,
     config: { WEBHOOK_URL, CHECK_INTERVAL, DEBUG },
     reinit: () => {
       initialized = false;
       lastSeenMessages.clear();
+      pendingQueue.length = 0;
       checkForNewMessages();
     }
   };
