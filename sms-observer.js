@@ -2,18 +2,26 @@
  * MutationObserver script to detect new SMS messages in Google Messages web.
  * Inject this into the messages.google.com page via browser automation.
  * 
- * This is the polling-based version - messages are stored in memory and
- * retrieved via window._smsObserver.getPending()
+ * Configuration:
+ *   Set WEBHOOK_URL below or pass via query param when injecting.
+ * 
+ * Usage:
+ *   1. Load messages.google.com in browser
+ *   2. Inject this script via browser evaluate
+ *   3. Script watches for new messages and POSTs to webhook
+ * 
+ * Debug:
+ *   Access window._smsObserver in browser console for debugging.
  */
 
 (function(config) {
   // Configuration
+  const WEBHOOK_URL = config?.webhookUrl || 'http://127.0.0.1:19888/sms-inbound';
   const CHECK_INTERVAL = config?.checkInterval || 2000; // ms between polls
   const DEBUG = config?.debug || false;
   
   // State
   let lastSeenMessages = new Map(); // contact -> { preview, time }
-  let pendingNotifications = []; // Queue of new messages to be picked up
   let initialized = false;
   let observerAttached = false;
   
@@ -104,7 +112,7 @@
   }
   
   /**
-   * Check for new messages and queue notifications
+   * Check for new messages and notify webhook
    */
   function checkForNewMessages() {
     const conversations = getConversations();
@@ -131,19 +139,23 @@
       if (isNewMessage && isIncoming) {
         logAlways('New message detected:', c.contact, '-', c.preview.substring(0, 50));
         
-        // Add to pending queue (for polling retrieval)
-        pendingNotifications.push({
-          contact: c.contact,
-          preview: c.preview,
-          time: c.time,
-          timestamp: Date.now(),
-          hasUnread: c.hasUnread
+        // POST to webhook
+        fetch(WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contact: c.contact,
+            preview: c.preview,
+            time: c.time,
+            timestamp: Date.now(),
+            hasUnread: c.hasUnread
+          })
+        }).then(r => {
+          if (r.ok) log('Webhook notified');
+          else logAlways('Webhook returned', r.status);
+        }).catch(e => {
+          logAlways('Webhook error:', e.message);
         });
-        
-        // Limit queue size
-        if (pendingNotifications.length > 50) {
-          pendingNotifications = pendingNotifications.slice(-50);
-        }
       }
       
       // Update tracked state
@@ -199,7 +211,8 @@
   }
   
   // Start
-  logAlways('Starting SMS observer (polling mode)...');
+  logAlways('Starting SMS observer...');
+  logAlways('Webhook URL:', WEBHOOK_URL);
   
   if (document.readyState === 'complete') {
     setupObserver();
@@ -207,28 +220,25 @@
     window.addEventListener('load', setupObserver);
   }
   
-  // Expose API for polling retrieval
+  // Expose API for debugging and management
   window._smsObserver = {
-    // Get and clear pending notifications
-    getPending: () => {
-      const pending = [...pendingNotifications];
-      pendingNotifications = [];
-      return pending;
-    },
-    // Check without clearing
-    hasPending: () => pendingNotifications.length > 0,
-    // Peek without clearing
-    peekPending: () => [...pendingNotifications],
-    // Force check
     check: checkForNewMessages,
-    // Get conversations
     getConversations,
-    // Debug info
-    _config: { CHECK_INTERVAL, DEBUG }
+    getPending: () => {
+      return getConversations().filter(c => c.hasUnread);
+    },
+    lastSeen: lastSeenMessages,
+    config: { WEBHOOK_URL, CHECK_INTERVAL, DEBUG },
+    reinit: () => {
+      initialized = false;
+      lastSeenMessages.clear();
+      checkForNewMessages();
+    }
   };
   
-  logAlways('SMS Observer loaded (polling mode). Access window._smsObserver for debugging.');
+  logAlways('SMS Observer loaded. Access window._smsObserver for debugging.');
   
-  return 'SMS Observer injected successfully (polling mode)';
+  return 'SMS Observer injected successfully';
   
+// Pass config object when evaluating, or use defaults
 })(typeof __SMS_OBSERVER_CONFIG__ !== 'undefined' ? __SMS_OBSERVER_CONFIG__ : {});

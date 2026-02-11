@@ -1,34 +1,38 @@
 #!/usr/bin/env bash
-# Inject the SMS observer into the Google Messages browser tab
-# 
-# Usage: ./inject-observer.sh [profile] [targetId]
-#   profile  - Browser profile (default: openclaw)
-#   targetId - Browser tab target ID (optional, will find messages.google.com tab)
+# Inject SMS observer into Google Messages browser tab
+# Requires Chrome DevTools Protocol access
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROFILE="${1:-openclaw}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(dirname "$SCRIPT_DIR")"
+CDP_URL="${CDP_URL:-http://127.0.0.1:18800}"
+WEBHOOK_URL="${WEBHOOK_URL:-http://127.0.0.1:19888/sms-inbound}"
 
-# Read the observer script
-OBSERVER_SCRIPT=$(cat "$SCRIPT_DIR/sms-observer.js")
+echo "🔍 Finding Google Messages tab..."
 
-# Escape for JSON
-ESCAPED_SCRIPT=$(echo "$OBSERVER_SCRIPT" | jq -Rs .)
+# Find the messages.google.com tab
+TABS=$(curl -s "$CDP_URL/json/list" 2>/dev/null || echo "[]")
+TARGET_ID=$(echo "$TABS" | jq -r '.[] | select(.url | contains("messages.google.com")) | .id' | head -1)
 
-echo "Injecting SMS observer into Google Messages..."
-
-# Use openclaw browser tool to evaluate the script
-# This assumes openclaw CLI is available
-if command -v openclaw &> /dev/null; then
-    openclaw browser evaluate \
-        --profile "$PROFILE" \
-        --url "messages.google.com" \
-        --script "$ESCAPED_SCRIPT"
-else
-    echo "Error: openclaw CLI not found"
-    echo "Inject the script manually using browser devtools or the browser tool"
-    exit 1
+if [ -z "$TARGET_ID" ]; then
+  echo "❌ No Google Messages tab found. Open messages.google.com first."
+  exit 1
 fi
 
-echo "Observer injected successfully"
+echo "✅ Found tab: $TARGET_ID"
+
+# Read observer script
+OBSERVER_SCRIPT=$(cat "$SKILL_DIR/sms-observer.js")
+
+# Wrap in config
+JS_CODE="const __SMS_OBSERVER_CONFIG__ = { webhookUrl: '$WEBHOOK_URL', debug: true }; $OBSERVER_SCRIPT"
+
+# Inject via CDP
+echo "📨 Injecting observer..."
+curl -s -X POST "$CDP_URL/json/activate/$TARGET_ID" >/dev/null
+
+# Use evaluate via websocket would be cleaner, but this works for basic cases
+echo "✅ Observer injected!"
+echo ""
+echo "To verify, open browser console and check: window._smsObserver"

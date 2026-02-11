@@ -26,6 +26,20 @@ const NOTIFICATION_CHANNEL = process.env.SMS_NOTIFICATION_CHANNEL || 'telegram';
 const rateLimitMap = new Map();
 const RATE_LIMIT_MS = 5000; // Minimum ms between notifications for same contact
 
+// OTP / verification code filter patterns
+// Matches common 2FA, OTP, login codes, and transactional auth messages
+const OTP_PATTERNS = [
+  /\b(verification|verify|login|one[ -]?time|security|auth(entication)?)\s+(code|pin)\b/i,
+  /\bcode\s+(is|:)\s*\d{4,8}\b/i,
+  /\b\d{4,8}\s+(is\s+your|is\s+the)\s+.*(code|pin|otp)\b/i,
+  /\botp\b/i,
+  /\b(don'?t|do\s+not|never)\s+share\s+this\s+code\b/i,
+  /\bsafekey\b/i,
+  /\b2fa\b/i,
+  /\bvalid\s+for\s+\d+\s+min/i,
+  /\bexpires?\s+in\s+\d+\s+min/i,
+];
+
 // Deduplication to prevent observer re-initialization replays
 const seenMessages = new Map();
 const DEDUP_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
@@ -47,9 +61,20 @@ function cleanupSeenMessages() {
   }
 }
 
+function isOTP(text) {
+  if (!text) return false;
+  return OTP_PATTERNS.some(p => p.test(text));
+}
+
 function shouldNotify(data) {
   const now = Date.now();
   const contact = data.contact || 'Unknown';
+  const preview = data.preview || data.message || '';
+  
+  // OTP / verification code filter — drop silently
+  if (isOTP(preview)) {
+    return { notify: false, reason: 'otp-filtered' };
+  }
   
   // Rate limit check
   const lastNotified = rateLimitMap.get(contact) || 0;

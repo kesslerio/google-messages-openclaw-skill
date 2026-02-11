@@ -1,26 +1,23 @@
 #!/usr/bin/env bash
 # Start the SMS webhook server
-#
-# Usage: ./start-webhook.sh
-#
-# Environment variables:
-#   SMS_NOTIFICATION_TARGET  - Where to send notifications (e.g., "telegram:123456")
-#   SMS_NOTIFICATION_CHANNEL - Channel type (default: telegram)
-#   SMS_WEBHOOK_PORT         - Port to listen on (default: 19888)
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Check for required environment
-if [ -z "$SMS_NOTIFICATION_TARGET" ]; then
-    echo "Warning: SMS_NOTIFICATION_TARGET not set"
-    echo "Notifications will be logged but not forwarded"
-    echo ""
-    echo "Set it like:"
-    echo "  export SMS_NOTIFICATION_TARGET='telegram:123456789'"
-    echo ""
+cd "$SKILL_DIR"
+
+echo "🚀 Starting SMS webhook server..."
+echo "📡 Webhook: http://127.0.0.1:19888/sms-inbound"
+echo "📊 Health:  http://127.0.0.1:19888/health"
+echo ""
+
+# Check if already running
+if pgrep -f "sms-webhook-server.js" > /dev/null; then
+  echo "⚠️  Webhook server already running"
+  echo "   Use: pkill -f sms-webhook-server.js  # to stop"
+  exit 1
 fi
 
-cd "$SCRIPT_DIR"
-exec node sms-webhook-server.js
+exec node "$SKILL_DIR/sms-webhook-server.js"
