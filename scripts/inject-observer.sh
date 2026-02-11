@@ -36,6 +36,15 @@ fi
 
 echo "🔗 WebSocket: $WS_URL"
 
+# Ensure ws module is installed (auto-install on fresh checkout)
+if [ ! -d "$SKILL_DIR/node_modules/ws" ]; then
+  echo "📦 Installing ws dependency..."
+  (cd "$SKILL_DIR" && npm install --no-audit --no-fund --silent) || {
+    echo "❌ Failed to install dependencies. Run 'npm install' in $SKILL_DIR"
+    exit 1
+  }
+fi
+
 # Read observer script and build the JS payload
 OBSERVER_SCRIPT=$(cat "$SKILL_DIR/sms-observer.js")
 # Use var (not const) so re-injection in the same tab doesn't throw

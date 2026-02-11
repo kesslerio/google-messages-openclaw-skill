@@ -15,6 +15,14 @@
  */
 
 (function(config) {
+  // Tear down previous instance to prevent duplicate observers on re-injection
+  if (window._smsObserver) {
+    if (window._smsObserverCleanup) {
+      window._smsObserverCleanup();
+    }
+    console.log('[SMS Observer] Previous instance cleaned up, reinitializing...');
+  }
+  
   // Configuration
   const WEBHOOK_URL = config?.webhookUrl || 'http://127.0.0.1:19888/sms-inbound';
   const CHECK_INTERVAL = config?.checkInterval || 2000; // ms between polls
@@ -222,7 +230,16 @@
     checkForNewMessages();
     
     // Backup polling (in case mutations are missed)
-    setInterval(checkForNewMessages, CHECK_INTERVAL);
+    const pollInterval = setInterval(checkForNewMessages, CHECK_INTERVAL);
+    
+    // Register cleanup function for safe re-injection
+    window._smsObserverCleanup = () => {
+      observer.disconnect();
+      clearInterval(pollInterval);
+      clearTimeout(window._smsObserverTimeout);
+      observerAttached = false;
+      logAlways('Observer disconnected and intervals cleared');
+    };
   }
   
   // Start
