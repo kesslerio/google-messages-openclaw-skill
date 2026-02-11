@@ -38,10 +38,16 @@ echo "🔗 WebSocket: $WS_URL"
 
 # Read observer script and build the JS payload
 OBSERVER_SCRIPT=$(cat "$SKILL_DIR/sms-observer.js")
-JS_CODE="const __SMS_OBSERVER_CONFIG__ = { webhookUrl: '$WEBHOOK_URL', debug: true }; $OBSERVER_SCRIPT"
+# Use var (not const) so re-injection in the same tab doesn't throw
+# "Identifier has already been declared"
+JS_CODE="var __SMS_OBSERVER_CONFIG__ = { webhookUrl: '$WEBHOOK_URL', debug: true }; $OBSERVER_SCRIPT"
 
 # Evaluate via CDP WebSocket using Node.js
 echo "📨 Injecting observer via Runtime.evaluate..."
+
+# Capture exit code explicitly (don't let set -e kill us before diagnostics)
+RESULT=""
+EXIT_CODE=0
 RESULT=$(NODE_PATH="$SKILL_DIR/node_modules" node -e "
 const WebSocket = require('ws');
 const ws = new WebSocket(process.argv[1]);
@@ -75,10 +81,9 @@ ws.on('error', (err) => {
   console.error('WebSocket error:', err.message);
   process.exit(1);
 });
-" "$WS_URL" "$(echo "$JS_CODE" | base64 -w0)" 2>&1)
+" "$WS_URL" "$(echo "$JS_CODE" | base64 -w0)" 2>&1) || EXIT_CODE=$?
 
-EXIT_CODE=$?
-if [ $EXIT_CODE -ne 0 ]; then
+if [ "$EXIT_CODE" -ne 0 ]; then
   echo "❌ Injection failed: $RESULT"
   exit 1
 fi
