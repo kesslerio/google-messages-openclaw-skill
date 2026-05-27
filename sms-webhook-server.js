@@ -15,7 +15,7 @@
  */
 
 const http = require('http');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 // Configuration - edit these or use environment variables
 const PORT = process.env.SMS_WEBHOOK_PORT || 19888;
@@ -111,8 +111,16 @@ function forwardToOpenClaw(data) {
   try {
     // Use full path to openclaw CLI (not in PATH for systemd service)
     const openclawPath = process.env.OPENCLAW_PATH || '/home/art/.local/bin/openclaw';
-    const cmd = `${openclawPath} message send -t "${NOTIFICATION_TARGET}" --channel ${NOTIFICATION_CHANNEL} -m "${msg.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`;
-    execSync(cmd, { timeout: 15000, stdio: 'pipe' });
+    execFileSync(openclawPath, [
+      'message',
+      'send',
+      '-t',
+      NOTIFICATION_TARGET,
+      '--channel',
+      NOTIFICATION_CHANNEL,
+      '-m',
+      msg.replace(/\n/g, ' '),
+    ], { timeout: 15000, stdio: 'pipe' });
     console.log('✅ Forwarded to', NOTIFICATION_CHANNEL);
   } catch (e) {
     console.error('❌ Failed to forward:', e.message);
